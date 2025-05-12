@@ -32,5 +32,5 @@ jobs:
           
       - name: Generate coverage report
         run: |
-          coverage run --source=alert_module -m pytest improved_integration_tests.py
+          coverage run --source=alert_module -m pytest integration_test_alert_module.py
           coverage report -m
