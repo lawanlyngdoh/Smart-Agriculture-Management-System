@@ -2,4 +2,5 @@ pytest
 pytest-mock
 coverage
 radon
-cProfile
+ruff
+bandit==1.7.5
