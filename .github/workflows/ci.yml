@@ -28,7 +28,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest improved_integration_tests.py -v
+          pytest integration_test_alert_module.py -v
           
       - name: Generate coverage report
         run: |
