@@ -7,9 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  build-test:
+  build-test-publish:
     runs-on: ubuntu-latest
     
     steps:
@@ -26,7 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run linting (Ruff)
         run: |
           pytest integration_test_alert_module.py -v
           
@@ -34,3 +35,21 @@ jobs:
         run: |
           coverage run --source=alert_module -m pytest integration_test_alert_module.py
           coverage report -m
+          ruff check . --exit-zero
+
+      - name: Run security scan (Bandit)
+        run: |
+          bandit -r . || true
+
+      - name: Build Docker Image
+        run: |
+          docker build -t alert-module:latest .
+
+      - name: Push Docker Image to Docker Hub
+        env:
+          DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin
+          docker tag alert-module:latest lawanlyngdoh/alert-module:latest
+          docker push lawanlyngdoh/alert-module:latest
