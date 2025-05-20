@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source
+      # 1. Checkout
       - name: Checkout code
         uses: actions/checkout@v3
 
@@ -22,8 +22,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      # 3. Install dependencies
-      - name: Install Python dependencies
+      # 3. Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -43,14 +43,13 @@ jobs:
 
       # 6. Build Docker image
       - name: Build Docker image
-        run: |
-          docker build -t alert-module:latest .
+        run: docker build -t alert-module:latest .
 
-      # 7. Start service via Docker Compose
+      # 7. Start service
       - name: Start service
         run: docker compose up --build -d
 
-      # 8. Wait for HTTP endpoint to be ready
+      # 8. Wait for HTTP 200
       - name: Wait for service to be ready
         run: |
           for i in {1..15}; do
@@ -63,11 +62,12 @@ jobs:
       # 9. Dynamic security scan (ZAP)
       - name: Run ZAP baseline scan
         run: |
-          docker pull owasp/zap2docker-stable
+          # pull the current stable ZAP image
+          docker pull zaproxy/zap-stable:latest
           docker run --rm \
             --link smart-agriculture-management-system-alert-module:alert-module \
             -v "${{ github.workspace }}":/zap/wrk/:rw \
-            -t owasp/zap2docker-stable \
+            -t zaproxy/zap-stable:latest \
               zap-baseline.py \
                 -t http://alert-module:8080 \
                 -r /zap/wrk/zap-report.html
@@ -85,7 +85,7 @@ jobs:
             | tar -xz
           sudo mv k6-v0.44.0-linux-amd64/k6 /usr/local/bin/
 
-      # 11. Run k6 load test
+      # 11. Run load test
       - name: Run k6 load test
         run: |
           k6 run load_test.js --out json=load_results.json
@@ -96,7 +96,7 @@ jobs:
           name: load-results
           path: load_results.json
 
-      # 12. Publish Docker image to Docker Hub
+      # 12. Publish Docker image
       - name: Publish Docker image to Docker Hub
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
@@ -106,6 +106,6 @@ jobs:
           docker tag alert-module:latest lawanlyngdoh/alert-module:latest
           docker push lawanlyngdoh/alert-module:latest
 
-      # 13. Tear down services
+      # 13. Tear down
       - name: Tear down services
         run: docker compose down
