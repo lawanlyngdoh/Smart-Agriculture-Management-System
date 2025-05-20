@@ -71,7 +71,7 @@ jobs:
                 -r /zap/wrk/zap-report.html
 
       - name: Upload ZAP report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-report.html
@@ -87,7 +87,7 @@ jobs:
           k6 run load_test.js --out json=load_results.json
 
       - name: Upload load test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: load-results
           path: load_results.json
