@@ -12,44 +12,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
+      # 1. Checkout source
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. Python setup
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      # 3. Install deps
+      # 3. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Tests, coverage & lint
-      - name: Run tests, coverage & lint
+      # 4. Run tests & coverage
+      - name: Run tests & generate coverage
         run: |
           pytest integration_test_alert_module.py -v
           coverage run --source=alert_module -m pytest integration_test_alert_module.py
           coverage report -m
+
+      # 5. Lint with Ruff
+      - name: Lint (Ruff)
+        run: |
           ruff check . --exit-zero
 
-      # 5. Static security scan
+      # 6. Static security scan
       - name: Static security scan (Bandit)
         run: |
           bandit -r . || true
 
-      # 6. Build Docker image
+      # 7. Build Docker image
       - name: Build Docker image
-        run: docker build -t alert-module:latest .
+        run: |
+          docker build -t alert-module:latest .
 
-      # 7. Start service
+      # 8. Start service via Docker Compose
       - name: Start service
         run: docker compose up --build -d
 
-      # 8. Wait for HTTP 200
+      # 9. Wait for HTTP endpoint
       - name: Wait for service to be ready
         run: |
           for i in {1..15}; do
@@ -59,44 +64,45 @@ jobs:
             sleep 2
           done
 
-      # 9. Dynamic security scan (ZAP)
+      # 10. Dynamic security scan (ZAP)
       - name: Run ZAP baseline scan
         run: |
-          # pull the current stable ZAP image
           docker pull zaproxy/zap-stable:latest
           docker run --rm \
-            --link smart-agriculture-management-system-alert-module:alert-module \
-            -v "${{ github.workspace }}":/zap/wrk/:rw \
+            --network host \
+            -v "${{ github.workspace }}":/zap/wrk:rw \
             -t zaproxy/zap-stable:latest \
               zap-baseline.py \
-                -t http://alert-module:8080 \
+                -t http://localhost:8080 \
                 -r /zap/wrk/zap-report.html
 
+      # 11. Upload the ZAP report
       - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-report.html
 
-      # 10. Install k6
+      # 12. Install k6
       - name: Install k6
         run: |
           curl -sL https://github.com/grafana/k6/releases/download/v0.44.0/k6-v0.44.0-linux-amd64.tar.gz \
             | tar -xz
           sudo mv k6-v0.44.0-linux-amd64/k6 /usr/local/bin/
 
-      # 11. Run load test
+      # 13. Run k6 load test
       - name: Run k6 load test
         run: |
           k6 run load_test.js --out json=load_results.json
 
+      # 14. Upload load test results
       - name: Upload load test results
         uses: actions/upload-artifact@v4
         with:
           name: load-results
           path: load_results.json
 
-      # 12. Publish Docker image
+      # 15. Publish Docker image to Docker Hub
       - name: Publish Docker image to Docker Hub
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
@@ -106,6 +112,6 @@ jobs:
           docker tag alert-module:latest lawanlyngdoh/alert-module:latest
           docker push lawanlyngdoh/alert-module:latest
 
-      # 13. Tear down
+      # 16. Tear down services
       - name: Tear down services
         run: docker compose down
