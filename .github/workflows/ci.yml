@@ -10,42 +10,89 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-test-publish:
+  build-test-publish-load:
     runs-on: ubuntu-latest
-    
+    services:
+      # Spin up Docker Compose services so both alert-module and metrics endpoints are available
+      docker:
+        image: docker:24-dind
+        options: --privileged
+        ports:
+          - 2375:2375
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run linting (Ruff)
+      - name: Run integration tests & linting
         run: |
           pytest integration_test_alert_module.py -v
-          
-      - name: Generate coverage report
-        run: |
           coverage run --source=alert_module -m pytest integration_test_alert_module.py
           coverage report -m
           ruff check . --exit-zero
 
-      - name: Run security scan (Bandit)
+      - name: Static security scan (Bandit)
         run: |
           bandit -r . || true
 
-      - name: Build Docker Image
-        run: |
-          docker build -t alert-module:latest .
+      - name: Build Docker image
+        run: docker build -t alert-module:latest .
 
-      - name: Push Docker Image to Docker Hub
+      - name: Start services (Compose)
+        run: |
+          docker compose up --build -d
+      - name: Wait for alert-module
+        run: |
+          for i in {1..15}; do
+            if curl -sf http://localhost:8080/ >/dev/null; then
+              echo "Service is up"; break
+            fi
+            sleep 2
+          done
+
+      - name: Dynamic security scan (ZAP)
+        run: |
+          docker run --rm \
+            --link smart-agriculture-management-system-alert-module:alert-module \
+            -v "${{ github.workspace }}":/zap/wrk/:rw \
+            -t zaproxy/zap2docker-stable \
+              zap-baseline.py \
+                -t http://alert-module:8080 \
+                -r /zap/wrk/zap-report.html
+
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-report
+          path: zap-report.html
+
+      - name: Install k6
+        run: |
+          curl -sL https://github.com/grafana/k6/releases/download/v0.44.0/k6-v0.44.0-linux-amd64.tar.gz |
+            tar -xz
+          sudo mv k6-v0.44.0-linux-amd64/k6 /usr/local/bin/
+
+      - name: Run load test (k6)
+        run: |
+          k6 run load_test.js --out json=load_results.json
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: load-results
+          path: load_results.json
+
+      - name: Publish Docker image to Docker Hub
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
@@ -53,3 +100,6 @@ jobs:
           echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin
           docker tag alert-module:latest lawanlyngdoh/alert-module:latest
           docker push lawanlyngdoh/alert-module:latest
+
+      - name: Tear down services
+        run: docker compose down
