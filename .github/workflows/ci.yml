@@ -2,23 +2,14 @@ name: CI Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build-test-publish-load:
+  build-test-scan-load-publish:
     runs-on: ubuntu-latest
-    services:
-      # Spin up Docker Compose services so both alert-module and metrics endpoints are available
-      docker:
-        image: docker:24-dind
-        options: --privileged
-        ports:
-          - 2375:2375
 
     steps:
       - name: Checkout code
@@ -29,12 +20,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run integration tests & linting
+      - name: Run tests & lint
         run: |
           pytest integration_test_alert_module.py -v
           coverage run --source=alert_module -m pytest integration_test_alert_module.py
@@ -45,17 +36,17 @@ jobs:
         run: |
           bandit -r . || true
 
-      - name: Build Docker image
+      - name: Build Docker Image
         run: docker build -t alert-module:latest .
 
-      - name: Start services (Compose)
-        run: |
-          docker compose up --build -d
-      - name: Wait for alert-module
+      - name: Start service
+        run: docker compose up --build -d
+
+      - name: Wait for HTTP endpoint
         run: |
           for i in {1..15}; do
             if curl -sf http://localhost:8080/ >/dev/null; then
-              echo "Service is up"; break
+              echo "Service is up" && break
             fi
             sleep 2
           done
@@ -78,13 +69,12 @@ jobs:
 
       - name: Install k6
         run: |
-          curl -sL https://github.com/grafana/k6/releases/download/v0.44.0/k6-v0.44.0-linux-amd64.tar.gz |
-            tar -xz
+          wget https://github.com/grafana/k6/releases/download/v0.44.0/k6-v0.44.0-linux-amd64.tar.gz
+          tar -xzf k6-v0.44.0-linux-amd64.tar.gz
           sudo mv k6-v0.44.0-linux-amd64/k6 /usr/local/bin/
 
-      - name: Run load test (k6)
-        run: |
-          k6 run load_test.js --out json=load_results.json
+      - name: Run k6 load test
+        run: k6 run load_test.js --out json=load_results.json
 
       - name: Upload load test results
         uses: actions/upload-artifact@v4
@@ -97,7 +87,8 @@ jobs:
           DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin
+          echo "${{ secrets.DOCKER_PASSWORD }}" \
+            | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
           docker tag alert-module:latest lawanlyngdoh/alert-module:latest
           docker push lawanlyngdoh/alert-module:latest
 
